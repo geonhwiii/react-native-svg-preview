@@ -1,0 +1,68 @@
+{
+  "name": "react-native-svg-preview",
+  "displayName": "React Native SVG Preview",
+  "description": "Preview SVG components in React Native TSX files",
+  "version": "0.1.0",
+  "publisher": "geonhwiii",
+  "author": "Dan",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/geonhwiii/react-native-svg-preview"
+  },
+  "keywords": [
+    "react-native",
+    "svg",
+    "preview",
+    "tsx",
+    "visualization"
+  ],
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "icon": "logo.png",
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "react-native-svg-preview.test",
+        "title": "Test Extension"
+      },
+      {
+        "command": "react-native-svg-preview.previewSvg",
+        "title": "Preview SVG"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "react-native-svg-preview.previewSvg",
+          "when": "resourceExtname == .tsx"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "react-native-svg-preview.previewSvg",
+          "when": "resourceExtname == .tsx"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "16.x",
+    "@types/vscode": "^1.74.0",
+    "@vscode/vsce": "^3.5.0",
+    "typescript": "^4.9.4"
+  }
+}
