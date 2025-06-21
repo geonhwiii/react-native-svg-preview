@@ -2,7 +2,7 @@
   "name": "react-native-svg-preview",
   "displayName": "React Native SVG Preview",
   "description": "Preview SVG components in React Native TSX files",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "gunwww",
   "author": "Dan",
   "license": "MIT",

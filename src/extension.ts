@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
 
+// 전역 변수로 웹뷰 패널 참조 저장
+let currentPanel: vscode.WebviewPanel | undefined = undefined;
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('React Native SVG Preview 확장 프로그램이 활성화되었습니다!');
     
@@ -10,33 +13,53 @@ export function activate(context: vscode.ExtensionContext) {
     
     // SVG 미리보기 명령 등록
     const previewCommand = vscode.commands.registerCommand('react-native-svg-preview.previewSvg', async (uri?: vscode.Uri) => {
-        // 현재 활성 에디터에서 URI 가져오기
-        if (!uri && vscode.window.activeTextEditor) {
-            uri = vscode.window.activeTextEditor.document.uri;
+        await showSvgPreview(uri);
+    });
+    
+    // 활성 에디터 변경 감지
+    const activeEditorChangeListener = vscode.window.onDidChangeActiveTextEditor(async (editor) => {
+        if (editor && currentPanel && editor.document.languageId === 'typescriptreact') {
+            // TSX 파일이 활성화되면 자동으로 SVG 미리보기 업데이트
+            await updateSvgPreview(editor.document.uri);
         }
+    });
+    
+    context.subscriptions.push(testCommand, previewCommand, activeEditorChangeListener);
+}
+
+async function showSvgPreview(uri?: vscode.Uri) {
+    // 현재 활성 에디터에서 URI 가져오기
+    if (!uri && vscode.window.activeTextEditor) {
+        uri = vscode.window.activeTextEditor.document.uri;
+    }
+    
+    if (!uri) {
+        vscode.window.showErrorMessage('파일을 선택해주세요.');
+        return;
+    }
+    
+    try {
+        // 파일 내용 읽기
+        const document = await vscode.workspace.openTextDocument(uri);
+        const content = document.getText();
         
-        if (!uri) {
-            vscode.window.showErrorMessage('파일을 선택해주세요.');
+        // SVG 컴포넌트 추출
+        const svgComponents = extractSvgComponents(content);
+        
+        if (svgComponents.length === 0) {
+            vscode.window.showInformationMessage('이 파일에서 React Native SVG 컴포넌트를 찾을 수 없습니다.');
             return;
         }
         
-        try {
-            // 파일 내용 읽기
-            const document = await vscode.workspace.openTextDocument(uri);
-            const content = document.getText();
-            
-            // SVG 컴포넌트 추출
-            const svgComponents = extractSvgComponents(content);
-            
-            if (svgComponents.length === 0) {
-                vscode.window.showInformationMessage('이 파일에서 React Native SVG 컴포넌트를 찾을 수 없습니다.');
-                return;
-            }
-            
-            vscode.window.showInformationMessage(`${svgComponents.length}개의 SVG 컴포넌트를 찾았습니다!`);
-            
-            // 웹뷰 패널 생성
-            const panel = vscode.window.createWebviewPanel(
+        // 패널이 이미 열려있는지 확인
+        if (currentPanel) {
+            // 기존 패널이 열려있으면 내용만 업데이트
+            currentPanel.webview.html = getWebviewContent(svgComponents, uri.fsPath);
+            currentPanel.title = `SVG Preview - ${uri.fsPath.split('/').pop()}`;
+            currentPanel.reveal(); // 패널을 포커스로 가져오기
+        } else {
+            // 새 패널 생성
+            currentPanel = vscode.window.createWebviewPanel(
                 'svgPreview',
                 `SVG Preview - ${uri.fsPath.split('/').pop()}`,
                 vscode.ViewColumn.Two,
@@ -45,15 +68,42 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             );
             
-            // SVG 컴포넌트들을 HTML로 변환
-            panel.webview.html = getWebviewContent(svgComponents, uri.fsPath);
+            // 패널이 닫힐 때 참조 정리
+            currentPanel.onDidDispose(() => {
+                currentPanel = undefined;
+            });
             
-        } catch (error) {
-            vscode.window.showErrorMessage(`오류가 발생했습니다: ${error}`);
+            // SVG 컴포넌트들을 HTML로 변환
+            currentPanel.webview.html = getWebviewContent(svgComponents, uri.fsPath);
         }
-    });
+        
+        vscode.window.showInformationMessage(`${svgComponents.length}개의 SVG 컴포넌트를 찾았습니다!`);
+        
+    } catch (error) {
+        vscode.window.showErrorMessage(`오류가 발생했습니다: ${error}`);
+    }
+}
+
+async function updateSvgPreview(uri: vscode.Uri) {
+    if (!currentPanel) {
+        return; // 패널이 열려있지 않으면 업데이트하지 않음
+    }
     
-    context.subscriptions.push(testCommand, previewCommand);
+    try {
+        // 파일 내용 읽기
+        const document = await vscode.workspace.openTextDocument(uri);
+        const content = document.getText();
+        
+        // SVG 컴포넌트 추출
+        const svgComponents = extractSvgComponents(content);
+        
+        // 패널 내용 업데이트
+        currentPanel.webview.html = getWebviewContent(svgComponents, uri.fsPath);
+        currentPanel.title = `SVG Preview - ${uri.fsPath.split('/').pop()}`;
+        
+    } catch (error) {
+        console.error('SVG 미리보기 업데이트 중 오류:', error);
+    }
 }
 
 function extractSvgComponents(content: string): Array<{type: string, props: any, content?: string}> {
@@ -149,11 +199,12 @@ function propsToAttributes(props: any): string {
 function getWebviewContent(components: Array<{type: string, props: any, content?: string}>, fileName: string): string {
     const svgElements = components.map((component, index) => {
         const standardSvg = convertToStandardSvg(component);
+        const svgName = fileName.split('/').pop()?.split('.')[0];
         
         return `
             <div class="svg-component">
                 <div class="component-header">
-                    <h3>컴포넌트 ${index + 1}: &lt;${component.type}&gt;</h3>
+                    <h3>${svgName}</h3>
                 </div>
                 <div class="svg-container">
                     ${standardSvg}
@@ -295,7 +346,6 @@ function getWebviewContent(components: Array<{type: string, props: any, content?
     <div class="header">
         <h1>🎨 React Native SVG Preview</h1>
         <p><strong>파일:</strong> ${fileName}</p>
-        <p><strong>발견된 컴포넌트:</strong> ${components.length}개</p>
     </div>
     
     ${svgElements}
