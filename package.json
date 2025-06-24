@@ -2,7 +2,7 @@
   "name": "react-native-svg-preview",
   "displayName": "React Native SVG Preview",
   "description": "Preview SVG components in React Native TSX files",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "publisher": "gunwww",
   "author": "Dan",
   "license": "MIT",
@@ -34,9 +34,25 @@
       },
       {
         "command": "react-native-svg-preview.previewSvg",
-        "title": "Preview SVG"
+        "title": "Preview SVG",
+        "title%ko": "SVG 미리보기"
+      },
+      {
+        "command": "react-native-svg-preview.refreshMiniPreview",
+        "title": "Refresh SVG Mini Preview",
+        "title%ko": "SVG 미니 프리뷰 새로고침",
+        "icon": "$(refresh)"
       }
     ],
+    "views": {
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "svgMiniPreview",
+          "name": "SVG Preview"
+        }
+      ]
+    },
     "menus": {
       "explorer/context": [
         {
@@ -48,6 +64,13 @@
         {
           "command": "react-native-svg-preview.previewSvg",
           "when": "resourceExtname == .tsx"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "react-native-svg-preview.refreshMiniPreview",
+          "when": "view == svgMiniPreview",
+          "group": "navigation"
         }
       ]
     }

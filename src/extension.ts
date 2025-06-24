@@ -2,13 +2,88 @@ import * as vscode from 'vscode';
 
 // 전역 변수로 웹뷰 패널 참조 저장
 let currentPanel: vscode.WebviewPanel | undefined = undefined;
+let miniPreviewProvider: SvgMiniPreviewProvider | undefined = undefined;
+
+// 다국어 지원
+interface LocaleStrings {
+    extensionActivated: string;
+    extensionWorks: string;
+    selectFile: string;
+    noSvgComponents: string;
+    componentsFound: string;
+    errorOccurred: string;
+    miniPreviewUpdateError: string;
+    unknownError: string;
+    openTsxFile: string;
+    reactNativeSvgPreview: string;
+    noSvgComponentsFound: string;
+    svgComponents: string;
+    props: string;
+    file: string;
+    refreshSvgMiniPreview: string;
+}
+
+const locales: { [key: string]: LocaleStrings } = {
+    ko: {
+        extensionActivated: 'React Native SVG Preview 확장 프로그램이 활성화되었습니다!',
+        extensionWorks: '확장 프로그램이 작동합니다!',
+        selectFile: '파일을 선택해주세요.',
+        noSvgComponents: '이 파일에서 React Native SVG 컴포넌트를 찾을 수 없습니다.',
+        componentsFound: '개의 SVG 컴포넌트를 찾았습니다!',
+        errorOccurred: '오류가 발생했습니다: ',
+        miniPreviewUpdateError: '미니 프리뷰 업데이트 중 오류:',
+        unknownError: '알 수 없는 오류가 발생했습니다',
+        openTsxFile: 'TSX 파일을 열어서<br>React Native SVG를<br>미리보기하세요',
+        reactNativeSvgPreview: '🎨 React Native SVG Preview',
+        noSvgComponentsFound: 'SVG 컴포넌트를<br>찾을 수 없습니다',
+        svgComponents: '개의 SVG 컴포넌트',
+        props: 'Props',
+        file: '파일:',
+        refreshSvgMiniPreview: 'Refresh SVG Mini Preview'
+    },
+    en: {
+        extensionActivated: 'React Native SVG Preview extension is now active!',
+        extensionWorks: 'Extension is working!',
+        selectFile: 'Please select a file.',
+        noSvgComponents: 'No React Native SVG components found in this file.',
+        componentsFound: ' SVG components found!',
+        errorOccurred: 'An error occurred: ',
+        miniPreviewUpdateError: 'Error updating mini preview:',
+        unknownError: 'Unknown error occurred',
+        openTsxFile: 'Open a TSX file to<br>preview React Native SVG<br>components',
+        reactNativeSvgPreview: '🎨 React Native SVG Preview',
+        noSvgComponentsFound: 'No SVG components<br>found',
+        svgComponents: ' SVG components',
+        props: 'Props',
+        file: 'File:',
+        refreshSvgMiniPreview: 'Refresh SVG Mini Preview'
+    }
+};
+
+// 현재 언어 가져오기
+function getCurrentLocale(): string {
+    const vscodeLang = vscode.env.language;
+    return vscodeLang.startsWith('ko') ? 'ko' : 'en';
+}
+
+// 현재 언어의 문자열 가져오기
+function getLocaleString(key: keyof LocaleStrings): string {
+    const currentLang = getCurrentLocale();
+    return locales[currentLang][key];
+}
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('React Native SVG Preview 확장 프로그램이 활성화되었습니다!');
+    console.log(getLocaleString('extensionActivated'));
+    
+    // 미니 프리뷰 프로바이더 등록
+    miniPreviewProvider = new SvgMiniPreviewProvider(context.extensionUri);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider('svgMiniPreview', miniPreviewProvider)
+    );
     
     // 테스트 명령 등록
     const testCommand = vscode.commands.registerCommand('react-native-svg-preview.test', () => {
-        vscode.window.showInformationMessage('확장 프로그램이 작동합니다!');
+        vscode.window.showInformationMessage(getLocaleString('extensionWorks'));
     });
     
     // SVG 미리보기 명령 등록
@@ -16,15 +91,46 @@ export function activate(context: vscode.ExtensionContext) {
         await showSvgPreview(uri);
     });
     
-    // 활성 에디터 변경 감지
-    const activeEditorChangeListener = vscode.window.onDidChangeActiveTextEditor(async (editor) => {
-        if (editor && currentPanel && editor.document.languageId === 'typescriptreact') {
-            // TSX 파일이 활성화되면 자동으로 SVG 미리보기 업데이트
-            await updateSvgPreview(editor.document.uri);
+    // 미니 프리뷰 새로고침 명령 등록
+    const refreshMiniPreviewCommand = vscode.commands.registerCommand('react-native-svg-preview.refreshMiniPreview', () => {
+        if (miniPreviewProvider && vscode.window.activeTextEditor) {
+            miniPreviewProvider.updatePreview(vscode.window.activeTextEditor.document.uri);
         }
     });
     
-    context.subscriptions.push(testCommand, previewCommand, activeEditorChangeListener);
+    // 활성 에디터 변경 감지
+    const activeEditorChangeListener = vscode.window.onDidChangeActiveTextEditor(async (editor) => {
+        if (editor) {
+            // 기존 패널 업데이트
+            if (currentPanel && editor.document.languageId === 'typescriptreact') {
+                await updateSvgPreview(editor.document.uri);
+            }
+            
+            // 미니 프리뷰 업데이트
+            if (miniPreviewProvider && editor.document.languageId === 'typescriptreact') {
+                miniPreviewProvider.updatePreview(editor.document.uri);
+            }
+        }
+    });
+    
+    // 문서 변경 감지 (실시간 업데이트)
+    const documentChangeListener = vscode.workspace.onDidChangeTextDocument((event) => {
+        if (event.document.languageId === 'typescriptreact' && miniPreviewProvider) {
+            // 디바운싱을 위해 타이머 사용
+            clearTimeout(miniPreviewProvider.updateTimer);
+            miniPreviewProvider.updateTimer = setTimeout(() => {
+                miniPreviewProvider!.updatePreview(event.document.uri);
+            }, 500);
+        }
+    });
+    
+    context.subscriptions.push(
+        testCommand, 
+        previewCommand, 
+        refreshMiniPreviewCommand,
+        activeEditorChangeListener,
+        documentChangeListener
+    );
 }
 
 async function showSvgPreview(uri?: vscode.Uri) {
@@ -34,7 +140,7 @@ async function showSvgPreview(uri?: vscode.Uri) {
     }
     
     if (!uri) {
-        vscode.window.showErrorMessage('파일을 선택해주세요.');
+        vscode.window.showErrorMessage(getLocaleString('selectFile'));
         return;
     }
     
@@ -47,7 +153,7 @@ async function showSvgPreview(uri?: vscode.Uri) {
         const svgComponents = extractSvgComponents(content);
         
         if (svgComponents.length === 0) {
-            vscode.window.showInformationMessage('이 파일에서 React Native SVG 컴포넌트를 찾을 수 없습니다.');
+            vscode.window.showInformationMessage(getLocaleString('noSvgComponents'));
             return;
         }
         
@@ -77,10 +183,14 @@ async function showSvgPreview(uri?: vscode.Uri) {
             currentPanel.webview.html = getWebviewContent(svgComponents, uri.fsPath);
         }
         
-        vscode.window.showInformationMessage(`${svgComponents.length}개의 SVG 컴포넌트를 찾았습니다!`);
+        const currentLang = getCurrentLocale();
+        const message = currentLang === 'ko' 
+            ? `${svgComponents.length}${getLocaleString('componentsFound')}`
+            : `${svgComponents.length}${getLocaleString('componentsFound')}`;
+        vscode.window.showInformationMessage(message);
         
     } catch (error) {
-        vscode.window.showErrorMessage(`오류가 발생했습니다: ${error}`);
+        vscode.window.showErrorMessage(`${getLocaleString('errorOccurred')}${error}`);
     }
 }
 
@@ -102,7 +212,7 @@ async function updateSvgPreview(uri: vscode.Uri) {
         currentPanel.title = `SVG Preview - ${uri.fsPath.split('/').pop()}`;
         
     } catch (error) {
-        console.error('SVG 미리보기 업데이트 중 오류:', error);
+        console.error(getLocaleString('miniPreviewUpdateError'), error);
     }
 }
 
@@ -210,7 +320,7 @@ function getWebviewContent(components: Array<{type: string, props: any, content?
                     ${standardSvg}
                 </div>
                 <div class="props-info">
-                    <strong>Props</strong>
+                    <strong>${getLocaleString('props')}</strong>
                     <pre>${JSON.stringify(component.props, null, 2)}</pre>
                 </div>
             </div>
@@ -344,15 +454,294 @@ function getWebviewContent(components: Array<{type: string, props: any, content?
 </head>
 <body>
     <div class="header">
-        <h1>🎨 React Native SVG Preview</h1>
-        <p><strong>파일:</strong> ${fileName}</p>
+        <h1>${getLocaleString('reactNativeSvgPreview')}</h1>
+        <p><strong>${getLocaleString('file')}</strong> ${fileName}</p>
     </div>
     
     ${svgElements}
     
-    ${components.length === 0 ? '<div class="no-components">이 파일에서 React Native SVG 컴포넌트를 찾을 수 없습니다.</div>' : ''}
+    ${components.length === 0 ? `<div class="no-components">${getLocaleString('noSvgComponents')}</div>` : ''}
 </body>
 </html>`;
 }
 
-export function deactivate() {} 
+export function deactivate() {}
+
+// 미니 프리뷰 프로바이더 클래스
+class SvgMiniPreviewProvider implements vscode.WebviewViewProvider {
+    public static readonly viewType = 'svgMiniPreview';
+    private _view?: vscode.WebviewView;
+    public updateTimer?: NodeJS.Timeout;
+
+    constructor(private readonly _extensionUri: vscode.Uri) {}
+
+    public resolveWebviewView(
+        webviewView: vscode.WebviewView,
+        context: vscode.WebviewViewResolveContext,
+        _token: vscode.CancellationToken,
+    ) {
+        this._view = webviewView;
+
+        webviewView.webview.options = {
+            enableScripts: true,
+            localResourceRoots: [this._extensionUri]
+        };
+
+        // 초기 컨텐츠 설정
+        this.updateView();
+
+        // 현재 활성 에디터가 있으면 미리보기 업데이트
+        if (vscode.window.activeTextEditor?.document.languageId === 'typescriptreact') {
+            this.updatePreview(vscode.window.activeTextEditor.document.uri);
+        }
+    }
+
+    public async updatePreview(uri: vscode.Uri) {
+        if (!this._view) {
+            return;
+        }
+
+        try {
+            const document = await vscode.workspace.openTextDocument(uri);
+            const content = document.getText();
+            const svgComponents = extractSvgComponents(content);
+            
+            if (svgComponents.length > 0) {
+                this._view.webview.html = this.getMiniPreviewContent(svgComponents, uri.fsPath);
+            } else {
+                this._view.webview.html = this.getEmptyContent();
+            }
+        } catch (error: any) {
+            console.error(getLocaleString('miniPreviewUpdateError'), error);
+            this._view.webview.html = this.getErrorContent(error.message || getLocaleString('unknownError'));
+        }
+    }
+
+    private updateView() {
+        if (!this._view) {
+            return;
+        }
+        this._view.webview.html = this.getWelcomeContent();
+    }
+
+    private getWelcomeContent(): string {
+        return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SVG Mini Preview</title>
+    <style>
+        body {
+            font-family: var(--vscode-font-family);
+            font-size: var(--vscode-font-size);
+            color: var(--vscode-foreground);
+            background-color: var(--vscode-sideBar-background);
+            margin: 0;
+            padding: 16px;
+            text-align: center;
+        }
+        .welcome {
+            padding: 20px 0;
+        }
+        .icon {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+        .message {
+            opacity: 0.7;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+    <div class="welcome">
+        <div class="icon">🎨</div>
+        <div class="message">
+            ${getLocaleString('openTsxFile')}
+        </div>
+    </div>
+</body>
+</html>`;
+    }
+
+    private getEmptyContent(): string {
+        return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SVG Mini Preview</title>
+    <style>
+        body {
+            font-family: var(--vscode-font-family);
+            font-size: var(--vscode-font-size);
+            color: var(--vscode-foreground);
+            background-color: var(--vscode-sideBar-background);
+            margin: 0;
+            padding: 16px;
+            text-align: center;
+        }
+        .empty {
+            padding: 20px 0;
+        }
+        .icon {
+            font-size: 1.5rem;
+            margin-bottom: 8px;
+            opacity: 0.5;
+        }
+        .message {
+            opacity: 0.6;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="empty">
+        <div class="icon">🔍</div>
+        <div class="message">
+            ${getLocaleString('noSvgComponentsFound')}
+        </div>
+    </div>
+</body>
+</html>`;
+    }
+
+    private getErrorContent(error: string): string {
+        return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SVG Mini Preview</title>
+    <style>
+        body {
+            font-family: var(--vscode-font-family);
+            font-size: var(--vscode-font-size);
+            color: var(--vscode-errorForeground);
+            background-color: var(--vscode-sideBar-background);
+            margin: 0;
+            padding: 16px;
+            text-align: center;
+        }
+        .error {
+            padding: 20px 0;
+        }
+        .icon {
+            font-size: 1.5rem;
+            margin-bottom: 8px;
+        }
+        .message {
+            font-size: 0.8rem;
+            word-break: break-word;
+        }
+    </style>
+</head>
+<body>
+    <div class="error">
+        <div class="icon">⚠️</div>
+        <div class="message">${error}</div>
+    </div>
+</body>
+</html>`;
+    }
+
+    private getMiniPreviewContent(components: Array<{type: string, props: any, content?: string}>, fileName: string): string {
+        const svgElements = components.map((component, index) => {
+            const standardSvg = convertToStandardSvg(component);
+            return `
+                <div class="svg-item" data-index="${index}">
+                    <div class="svg-wrapper">
+                        ${standardSvg}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SVG Mini Preview</title>
+    <style>
+        body {
+            font-family: var(--vscode-font-family);
+            font-size: var(--vscode-font-size);
+            color: var(--vscode-foreground);
+            background-color: var(--vscode-sideBar-background);
+            margin: 0;
+            padding: 8px;
+        }
+        
+        .header {
+            font-size: 0.75rem;
+            opacity: 0.7;
+            margin-bottom: 8px;
+            text-align: center;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            padding-bottom: 6px;
+        }
+        
+        .svg-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .svg-item {
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 6px;
+            overflow: hidden;
+            background-color: var(--vscode-editor-background);
+        }
+        
+        .svg-wrapper {
+            background: linear-gradient(45deg, #f8f9fa 25%, transparent 25%), 
+                        linear-gradient(-45deg, #f8f9fa 25%, transparent 25%), 
+                        linear-gradient(45deg, transparent 75%, #f8f9fa 75%), 
+                        linear-gradient(-45deg, transparent 75%, #f8f9fa 75%);
+            background-size: 8px 8px;
+            background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+            background-color: #ffffff;
+            padding: 12px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 60px;
+        }
+        
+        .svg-wrapper svg {
+            max-width: 100%;
+            max-height: 80px;
+            height: auto;
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));
+        }
+        
+        .count-info {
+            text-align: center;
+            font-size: 0.7rem;
+            opacity: 0.6;
+            margin-top: 8px;
+            padding-top: 6px;
+            border-top: 1px solid var(--vscode-panel-border);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        📱 ${fileName.split('/').pop()?.split('.')[0] || 'SVG'}
+    </div>
+    
+    <div class="svg-container">
+        ${svgElements}
+    </div>
+    
+    <div class="count-info">
+        ${getCurrentLocale() === 'ko' ? `${components.length}${getLocaleString('svgComponents')}` : `${components.length}${getLocaleString('svgComponents')}`}
+    </div>
+</body>
+</html>`;
+    }
+} 
